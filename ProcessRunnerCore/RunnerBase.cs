@@ -1,4 +1,5 @@
 ﻿using ProcessRunner.Diagnostics;
+using ProcessRunnerCore;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -10,11 +11,11 @@ namespace ProcessRunner
 {
     public class RunnerBase : IRunner
     {
+        private DateTime m_startTime;
         private Logger m_logger;
         private StreamWriter m_processInput;
         private StreamReader m_processOutput;
         private bool m_disposed = false;
-        private int m_waitForExitTime;
 
         protected Process RunnerProcess
         { get; }
@@ -35,37 +36,45 @@ namespace ProcessRunner
             }
         }
 
-        public RunnerTime RunnerTimings
-        { get; set; }
-        public bool RestartAfterUnexpectedShutdown
-        { get; set; } = false;
-        public string ProcessName
-        { get; }
-        public string TargetName
-        { get; }
-        public int WaitForExitTime
+        protected DateTime StartTime
         {
-            set => m_waitForExitTime = value < 0 ? throw new ArgumentOutOfRangeException() : value;
-            get => m_waitForExitTime;
+            get
+            {
+                return m_startTime;
+            }
+            set
+            {
+                m_startTime = DateTime.Now;
+
+                var now = DateTime.Now;
+                var nextRestartDate = now.Date.Add(RunnerInfo.RestartInterval);
+
+                if (nextRestartDate < now)
+                    NextRestartTime = nextRestartDate.AddDays(1);
+            }
         }
+        protected DateTime NextRestartTime
+        { get; private set; }
 
-        public RunnerBase(string fileName)
-            : this(fileName, string.Empty)
+        /// <summary>
+        /// Defines a user-specified name that represents the current <see cref="RunnerBase"/>.
+        /// </summary>
+        public string TargetName
+            => RunnerInfo.TargetName;
+
+        public RunnerInfo RunnerInfo
+        { get; }
+
+        public RunnerBase(RunnerInfo info)
+            : this(info, new Logger())
         { }
 
-        public RunnerBase(string fileName, string processName)
-            : this(fileName, processName, new Logger())
-        { }
-
-        public RunnerBase(string fileName, string processName, Logger logger)
+        public RunnerBase(RunnerInfo info, Logger logger)
         {
-            m_logger = logger;
+            RunnerInfo = info ?? throw new ArgumentNullException(nameof(info));
+            m_logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
-            RunnerTimings = new RunnerTime();
-            ProcessName = processName;
-            TargetName = fileName;
-
-            StartInfo = new ProcessStartInfo(fileName)
+            StartInfo = new ProcessStartInfo(info.ProcessName)
             {
                 UseShellExecute = false,
                 CreateNoWindow = false,
@@ -79,6 +88,14 @@ namespace ProcessRunner
                 EnableRaisingEvents = true,
             };
         }
+
+        public RunnerBase(string processName, string targetName)
+            : this(processName, targetName, new Logger())
+        { }
+
+        public RunnerBase(string processName, string targetName, Logger logger)
+            : this(new RunnerInfo(processName, targetName), logger)
+        { }
 
         ~RunnerBase()
         {
@@ -96,12 +113,12 @@ namespace ProcessRunner
 
                 RunnerProcess.Exited -= OnProcessExit;
                 RunnerProcess.Exited += OnProcessExit;
-                RunnerTimings.StartTime = DateTime.Now;
+                StartTime = DateTime.Now;
 
                 m_processInput = RunnerProcess.StandardInput;
                 m_processOutput = RunnerProcess.StandardOutput;
 
-                m_logger.Info($"Process \"{ProcessName}\" has been started.");
+                m_logger.Info($"Process \"{TargetName}\" has been started.");
 
                 return true;
             }
@@ -119,20 +136,20 @@ namespace ProcessRunner
 
             OnStop();
 
-            if (RunnerProcess.WaitForExit(WaitForExitTime))
+            if (RunnerProcess.WaitForExit(RunnerInfo.WaitForExitTime))
             {
-                m_logger.Info($"Process \"{ProcessName}\" gracefully stopped.");
+                m_logger.Info($"Process \"{TargetName}\" gracefully stopped.");
             }
             else
             {
                 RunnerProcess.Kill();
-                m_logger.Warning($"Process \"{ProcessName}\" forcefully stopped.");
+                m_logger.Warning($"Process \"{TargetName}\" forcefully stopped.");
             }
         }
 
         public virtual void Restart()
         {
-            m_logger.Info($"Restarting process: \"{ProcessName}\".");
+            m_logger.Info($"Restarting process: \"{TargetName}\".");
             Stop();
 
             Start();
@@ -143,10 +160,10 @@ namespace ProcessRunner
 
         protected virtual void OnProcessExit(object sender, EventArgs e)
         {
-            if (RestartAfterUnexpectedShutdown)
+            if (RunnerInfo.RestartAfterUnexpectedShutdown)
             {
-                m_logger.Warning($"Unexpected shutdown of process: \"{ProcessName}\".");
-                m_logger.Info($"Attempting to restart \"{ProcessName}\"");
+                m_logger.Warning($"Unexpected shutdown of process: \"{TargetName}\".");
+                m_logger.Info($"Attempting to restart \"{TargetName}\"");
                 Start();
             }
         }

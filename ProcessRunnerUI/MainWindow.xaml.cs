@@ -26,7 +26,7 @@ namespace ProcessRunnerUI
         public MainWindow()
         {
             m_runner = new RunnerBase("cmd.exe", "cmd");
-            m_runner.RestartAfterUnexpectedShutdown = true;
+            m_runner.RunnerInfo.RestartAfterUnexpectedShutdown = true;
 
             var logger = new Logger();
             logger.Info("Some text");

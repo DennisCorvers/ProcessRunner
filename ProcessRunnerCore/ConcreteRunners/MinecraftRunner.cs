@@ -1,12 +1,10 @@
-﻿namespace ProcessRunner.ConcreteRunners
+﻿using ProcessRunnerCore;
+
+namespace ProcessRunner.ConcreteRunners
 {
     public class MinecraftRunner : RunnerBase
     {
-        public MinecraftRunner(string fileName) : base(fileName)
-        {
-        }
-
-        public MinecraftRunner(string fileName, string processName) : base(fileName, processName)
+        public MinecraftRunner(RunnerInfo info) : base(info)
         {
         }
 
