@@ -28,5 +28,7 @@ namespace ProcessRunnerService.Hubs
         }
 
         // https://developer.okta.com/blog/2019/11/21/csharp-websockets-tutorial
+
+        // https://docs.microsoft.com/en-us/aspnet/signalr/overview/guide-to-the-api/hubs-api-guide-net-client#maxconnections
     }
 }

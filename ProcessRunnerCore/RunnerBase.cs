@@ -13,14 +13,13 @@ namespace ProcessRunner
         private Logger m_logger;
         private StreamWriter m_processInput;
         private StreamReader m_processOutput;
-        private readonly string m_fileName;
         private bool m_disposed = false;
         private int m_waitForExitTime;
 
         protected Process RunnerProcess
-        { get; private set; }
+        { get; }
         protected ProcessStartInfo StartInfo
-        { get; private set; }
+        { get; }
         protected bool HasExited
         {
             get
@@ -38,14 +37,12 @@ namespace ProcessRunner
 
         public RunnerTime RunnerTimings
         { get; set; }
-        public bool StopProcessWhenDispose
-        { get; set; } = true;
         public bool RestartAfterUnexpectedShutdown
         { get; set; } = false;
         public string ProcessName
-        { get; private set; }
+        { get; }
         public string TargetName
-            => m_fileName;
+        { get; }
         public int WaitForExitTime
         {
             set => m_waitForExitTime = value < 0 ? throw new ArgumentOutOfRangeException() : value;
@@ -66,7 +63,7 @@ namespace ProcessRunner
 
             RunnerTimings = new RunnerTime();
             ProcessName = processName;
-            m_fileName = fileName;
+            TargetName = fileName;
 
             StartInfo = new ProcessStartInfo(fileName)
             {
@@ -81,6 +78,11 @@ namespace ProcessRunner
                 StartInfo = StartInfo,
                 EnableRaisingEvents = true,
             };
+        }
+
+        ~RunnerBase()
+        {
+            Dispose(false);
         }
 
         public virtual bool Start()
@@ -161,13 +163,13 @@ namespace ProcessRunner
                         m_processInput.Dispose();
                         m_processOutput.Close();
                         m_processOutput.Dispose();
-
-                        if (StopProcessWhenDispose)
-                            RunnerProcess.Kill();
-
-                        RunnerProcess.Dispose();
                     }
                 }
+
+                if (!HasExited)
+                    RunnerProcess.Kill();
+
+                RunnerProcess.Dispose();
 
                 m_disposed = true;
             }
@@ -176,6 +178,7 @@ namespace ProcessRunner
         public void Dispose()
         {
             Dispose(true);
+            GC.SuppressFinalize(this);
         }
 
 

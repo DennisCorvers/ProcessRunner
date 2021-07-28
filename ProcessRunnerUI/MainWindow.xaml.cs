@@ -1,5 +1,6 @@
 ﻿using ProcessRunner;
 using ProcessRunner.Diagnostics;
+using ProcessRunnerCore.Configuration;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -20,11 +21,11 @@ namespace ProcessRunnerUI
     public partial class MainWindow : Window
     {
         private RunnerBase m_runner;
+        private GlobalConfig m_appConfig = new GlobalConfig();
 
         public MainWindow()
         {
             m_runner = new RunnerBase("cmd.exe", "cmd");
-            m_runner.StopProcessWhenDispose = true;
             m_runner.RestartAfterUnexpectedShutdown = true;
 
             var logger = new Logger();
@@ -46,6 +47,17 @@ namespace ProcessRunnerUI
         private async void BStop_OnClick(object sender, RoutedEventArgs e)
         {
             await m_runner.StopAsync();
+        }
+
+        private void BCreateRunner_OnClick(object sender, RoutedEventArgs e)
+        {
+            RunnerConfig config = new RunnerConfig(tbRunnerName.Text);
+
+            if (m_appConfig.AddConfig(config))
+            {
+                config.Save();
+                m_appConfig.Save();
+            }
         }
     }
 }
