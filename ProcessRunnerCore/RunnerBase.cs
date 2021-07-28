@@ -40,19 +40,12 @@ namespace ProcessRunner
         { get; set; }
         public bool StopProcessWhenDispose
         { get; set; } = true;
-        /// <summary>
-        /// Determines if the process should restart when it's stopped without calling <see cref="Stop"/>.
-        /// </summary>
         public bool RestartAfterUnexpectedShutdown
         { get; set; } = false;
-        /// <summary>
-        /// The name of the process that is running.
-        /// </summary>
         public string ProcessName
         { get; private set; }
-        /// <summary>
-        /// The amount of time in ms that <see cref="Stop"/> waits before killing the process.
-        /// </summary>
+        public string TargetName
+            => m_fileName;
         public int WaitForExitTime
         {
             set => m_waitForExitTime = value < 0 ? throw new ArgumentOutOfRangeException() : value;
