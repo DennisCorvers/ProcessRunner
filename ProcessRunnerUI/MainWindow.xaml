@@ -15,6 +15,7 @@
         <Button Content="Stop" HorizontalAlignment="Left" Margin="78.334,27,0,0" VerticalAlignment="Top" Width="75" Grid.Column="1" Click="BStop_OnClick"/>
         <TextBox HorizontalAlignment="Left" Height="23" Margin="44,96,0,0" TextWrapping="Wrap" Name="tbRunnerName" VerticalAlignment="Top" Width="120"/>
         <Button Content="Create Runner" HorizontalAlignment="Left" Margin="66,137,0,0" VerticalAlignment="Top" Width="75" Click="BCreateRunner_OnClick"/>
+        <ListBox HorizontalAlignment="Left" Name="ConsoleOutput" Height="174" Margin="44,186,0,0" VerticalAlignment="Top" Width="656" Grid.ColumnSpan="2"/>
 
     </Grid>
 </Window>

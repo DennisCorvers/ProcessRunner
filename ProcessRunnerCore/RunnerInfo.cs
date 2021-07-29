@@ -6,7 +6,7 @@ namespace ProcessRunnerCore
 {
     public class RunnerInfo
     {
-        private int m_waitForExitTime;
+        private int m_waitForExitTime = 100;
 
         /// <summary>
         /// The (local)time at which the process should restart. 18 hours = 6 PM.
@@ -38,7 +38,7 @@ namespace ProcessRunnerCore
         /// </summary>
         public int WaitForExitTime
         {
-            set => m_waitForExitTime = value < 0 ? throw new ArgumentOutOfRangeException() : value;
+            set => m_waitForExitTime = value < 100 ? 100 : value;
             get => m_waitForExitTime;
         }
 

@@ -8,9 +8,5 @@ namespace ProcessRunner.ConcreteRunners
         {
         }
 
-        protected override void OnStop()
-        {
-            base.OnStop();
-        }
     }
 }

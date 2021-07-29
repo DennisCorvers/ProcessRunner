@@ -5,13 +5,10 @@ namespace ProcessRunner
 {
     public interface IRunner : IDisposable
     {
-        bool Start();
-        Task<bool> StartAsync();
+        Task<bool> Start();
 
-        void Stop();
-        Task StopAsync();
+        Task Stop();
 
-        void Restart();
-        Task RestartAsync();
+        Task Restart();
     }
 }

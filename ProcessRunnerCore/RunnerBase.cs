@@ -5,38 +5,40 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace ProcessRunner
 {
     public class RunnerBase : IRunner
     {
+        private object m_syncroot = new object();
+        private RunnerStatus m_status;
+        private StreamWriter m_inputStream;
         private DateTime m_startTime;
-        private Logger m_logger;
-        private StreamWriter m_processInput;
-        private StreamReader m_processOutput;
         private bool m_disposed = false;
 
-        protected Process RunnerProcess
-        { get; }
-        protected ProcessStartInfo StartInfo
-        { get; }
+        private Process m_process;
+        private ProcessStartInfo m_startInfo;
+
         protected bool HasExited
         {
             get
             {
                 try
                 {
-                    return RunnerProcess.HasExited;
+                    return m_process.HasExited;
                 }
-                catch (InvalidOperationException)
+                catch (Exception)
                 {
                     return true;
                 }
             }
         }
+        protected Logger Logger
+        { get; }
 
-        protected DateTime StartTime
+        public DateTime StartTime
         {
             get
             {
@@ -53,7 +55,7 @@ namespace ProcessRunner
                     NextRestartTime = nextRestartDate.AddDays(1);
             }
         }
-        protected DateTime NextRestartTime
+        public DateTime NextRestartTime
         { get; private set; }
 
         /// <summary>
@@ -61,6 +63,11 @@ namespace ProcessRunner
         /// </summary>
         public string TargetName
             => RunnerInfo.TargetName;
+
+        public event Action OnRunnerStarted;
+        public event Action OnRunnerStopped;
+        public event Action OnRunnerExited;
+        public event Action<string> OnMessageReceived;
 
         public RunnerInfo RunnerInfo
         { get; }
@@ -71,21 +78,29 @@ namespace ProcessRunner
 
         public RunnerBase(RunnerInfo info, Logger logger)
         {
+            m_status = RunnerStatus.Stopped;
             RunnerInfo = info ?? throw new ArgumentNullException(nameof(info));
-            m_logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            Logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
-            StartInfo = new ProcessStartInfo(info.ProcessName)
+            m_startInfo = new ProcessStartInfo(info.ProcessName)
             {
                 UseShellExecute = false,
-                CreateNoWindow = false,
+                CreateNoWindow = true,
                 RedirectStandardInput = true,
-                RedirectStandardOutput = true
+                RedirectStandardOutput = true,
+                StandardOutputEncoding = Encoding.UTF8,
+                WindowStyle = ProcessWindowStyle.Hidden
             };
 
-            RunnerProcess = new Process()
+            m_process = new Process()
             {
-                StartInfo = StartInfo,
-                EnableRaisingEvents = true,
+                StartInfo = m_startInfo,
+                EnableRaisingEvents = true
+            };
+
+            m_process.OutputDataReceived += (obj, e) =>
+            {
+                OnMessageReceived?.Invoke(e.Data);
             };
         }
 
@@ -102,23 +117,59 @@ namespace ProcessRunner
             Dispose(false);
         }
 
-        public virtual bool Start()
+        public async Task Restart()
         {
-            if (HasExited)
-            {
-                if (!RunnerProcess.Start())
-                {
-                    throw new Exception("Process could not be started.");
-                }
+            ThrowOnDisposed();
 
-                RunnerProcess.Exited -= OnProcessExit;
-                RunnerProcess.Exited += OnProcessExit;
+            Logger.Info($"Restarting process: \"{TargetName}\".");
+            await Stop();
+
+            await Start();
+        }
+
+        public async Task<bool> Start()
+        {
+            ThrowOnDisposed();
+
+            lock (m_syncroot)
+            {
+                if (m_status != RunnerStatus.Stopped)
+                    return false;
+
+                m_status = RunnerStatus.Starting;
+            }
+
+            if (!HasExited)
+                return false;
+
+            await OnPreStart();
+            var res = await Task.Run(() =>
+            {
+                if (!m_process.Start())
+                    return false;
+
+                m_process.Exited -= OnProcessExit;
+                m_process.Exited += OnProcessExit;
                 StartTime = DateTime.Now;
 
-                m_processInput = RunnerProcess.StandardInput;
-                m_processOutput = RunnerProcess.StandardOutput;
+                m_process.BeginOutputReadLine();
 
-                m_logger.Info($"Process \"{TargetName}\" has been started.");
+                m_inputStream = m_process.StandardInput;
+
+                return true;
+            });
+
+            if (res)
+            {
+                Logger.Info($"Process \"{TargetName}\" has been started.");
+
+                lock (m_syncroot)
+                {
+                    m_status = RunnerStatus.Running;
+                }
+
+                await OnPostStart();
+                OnRunnerStarted?.Invoke();
 
                 return true;
             }
@@ -126,67 +177,126 @@ namespace ProcessRunner
             return false;
         }
 
-        public virtual void Stop()
+        public async Task Stop()
         {
+            ThrowOnDisposed();
+
+            lock (m_syncroot)
+            {
+                if (m_status != RunnerStatus.Running)
+                    return;
+
+                m_status = RunnerStatus.Stopping;
+            }
+
             if (HasExited)
                 return;
 
             // Remove OnExit event to prevent auto-restarting.
-            RunnerProcess.Exited -= OnProcessExit;
+            m_process.Exited -= OnProcessExit;
 
-            OnStop();
+            await OnPreStop();
 
-            if (RunnerProcess.WaitForExit(RunnerInfo.WaitForExitTime))
+            m_process.CancelOutputRead();
+
+            if (await Task.Run(() => m_process.WaitForExit(RunnerInfo.WaitForExitTime)))
             {
-                m_logger.Info($"Process \"{TargetName}\" gracefully stopped.");
+                Logger.Info($"Process \"{TargetName}\" gracefully stopped.");
             }
             else
             {
-                RunnerProcess.Kill();
-                m_logger.Warning($"Process \"{TargetName}\" forcefully stopped.");
+                m_process.Kill();
+                Logger.Warning($"Process \"{TargetName}\" forcefully stopped.");
+            }
+
+            lock (m_syncroot)
+            {
+                m_status = RunnerStatus.Stopped;
+            }
+
+            await OnPostStop();
+            OnRunnerStopped?.Invoke();
+        }
+
+        public async Task SendMessageAsync(string message)
+        {
+            ThrowOnDisposed();
+
+            lock (m_syncroot)
+            {
+                if (m_status != RunnerStatus.Running)
+                    return;
+            }
+
+            if (!HasExited)
+            {
+                await m_inputStream.WriteLineAsync(message);
+                await m_inputStream.FlushAsync();
             }
         }
 
-        public virtual void Restart()
+        public void SendMessage(string message)
         {
-            m_logger.Info($"Restarting process: \"{TargetName}\".");
-            Stop();
+            ThrowOnDisposed();
 
-            Start();
+            lock (m_syncroot)
+            {
+                if (m_status != RunnerStatus.Running)
+                    return;
+            }
+
+            if (!HasExited)
+            {
+                m_inputStream.WriteLine(message);
+                m_inputStream.Flush();
+            }
         }
 
-        protected virtual void OnStop()
+#pragma warning disable CS1998
+        /// <summary>
+        /// Occurs just before starting the process.
+        /// </summary>
+        protected virtual async Task OnPreStart() { }
+        /// <summary>
+        /// Occurs just after starting the process.
+        /// </summary>
+        protected virtual async Task OnPostStart() { }
+
+        /// <summary>
+        /// Occurs just before stopping.
+        /// </summary>
+        protected virtual async Task OnPreStop()
+        {
+            // Gracefully closes the process provided it reads from the input stream.
+            m_inputStream.Close();
+        }
+        /// <summary>
+        /// Occurs just after stopping.
+        /// </summary>
+        protected virtual async Task OnPostStop()
         { }
+#pragma warning restore CS1998
 
         protected virtual void OnProcessExit(object sender, EventArgs e)
         {
-            if (RunnerInfo.RestartAfterUnexpectedShutdown)
-            {
-                m_logger.Warning($"Unexpected shutdown of process: \"{TargetName}\".");
-                m_logger.Info($"Attempting to restart \"{TargetName}\"");
-                Start();
-            }
+            //            m_process.CancelOutputRead();
+            //            OnRunnerExited?.Invoke();
+
+            //            if (RunnerInfo.RestartAfterUnexpectedShutdown)
+            //            {
+            //                Logger.Warning($"Unexpected shutdown of process: \"{TargetName}\".");
+            //                Logger.Info($"Attempting to restart \"{TargetName}\"");
+            //#pragma warning disable
+            //                Start();
+            //#pragma warning restore
+            //            }
         }
 
         protected virtual void Dispose(bool disposing)
         {
             if (!m_disposed)
             {
-                if (disposing)
-                {
-                    if (RunnerProcess != null)
-                    {
-                        m_processInput.Close();
-                        m_processInput.Dispose();
-                        m_processOutput.Close();
-                        m_processOutput.Dispose();
-                    }
-                }
-
-                if (!HasExited)
-                    RunnerProcess.Kill();
-
-                RunnerProcess.Dispose();
+                m_process.Dispose();
 
                 m_disposed = true;
             }
@@ -198,20 +308,18 @@ namespace ProcessRunner
             GC.SuppressFinalize(this);
         }
 
-
-        public Task<bool> StartAsync()
+        private void ThrowOnDisposed()
         {
-            return Task.Run(() => Start());
+            if (m_disposed)
+                throw new ObjectDisposedException(nameof(RunnerBase));
         }
 
-        public Task StopAsync()
+        private enum RunnerStatus
         {
-            return Task.Run(() => Stop());
-        }
-
-        public Task RestartAsync()
-        {
-            return Task.Run(() => Restart());
+            Starting,
+            Running,
+            Stopping,
+            Stopped
         }
     }
 }
